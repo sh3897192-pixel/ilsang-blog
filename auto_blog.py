@@ -86,6 +86,9 @@ def build_prompt(trends, used_topics, today, topic=None, news=None):
 [글 쓰기]
 {fact_part}
 - 독자에게 실제로 도움이 되는 1500자 이상, 존댓말(~해요체), 소제목은 <h2>로 3~5개.
+- [검색 최적화] 사람들이 실제로 검색할 핵심 키워드 1개를 정해서 제목 앞부분, 첫 문단, 소제목 1~2개에 자연스럽게 넣으세요. 같은 키워드를 억지로 반복하지는 마세요.
+- [검색 최적화] 첫 문단은 2~3문장으로 이 글에서 무엇을 알 수 있는지 요약하세요 (검색 결과 미리보기에 그대로 쓰여요).
+- [검색 최적화] 제목은 40자 이내로, 낚시성 표현 없이 내용을 정확히 나타내세요.
 - 본문은 HTML로만 쓰세요(<p>, <h2>, <ul>, <li>, <b>, <a>). 마크다운 금지.
 - 사진 자리 3곳에 정확히 <!--IMG1-->, <!--IMG2-->, <!--IMG3--> 를 넣으세요. IMG1은 첫 문단 바로 아래, IMG2와 IMG3은 서로 다른 소제목 바로 아래.
 - 글 끝에 참고한 공식 자료 링크 1~2개를 <p>참고 자료: <a href="...">...</a></p> 형태로 넣으세요.
@@ -218,7 +221,50 @@ def write_post():
         if key not in post:
             raise ValueError(f"응답에 {key} 항목이 없어요")
     post["html"] = review_post(post["html"])
+    post["html"] = add_related_posts(post["html"], post["labels"], post["title"])
     return post, history
+
+
+def get_past_posts(n=50):
+    """블로그에 이미 게시된 글의 제목·주소·라벨을 가져와요 (내부 링크용)."""
+    try:
+        url = f"https://{CONFIG['blog_host']}/feeds/posts/summary?alt=json&max-results={n}"
+        entries = requests.get(url, timeout=30).json().get("feed", {}).get("entry", [])
+    except Exception:
+        return []
+    posts = []
+    for e in entries:
+        link = next((l["href"] for l in e.get("link", []) if l.get("rel") == "alternate"), None)
+        if link:
+            posts.append({
+                "title": e["title"]["$t"],
+                "url": link,
+                "labels": [c["term"] for c in e.get("category", [])],
+            })
+    return posts
+
+
+def add_related_posts(html, labels, title):
+    """라벨이 겹치는 예전 글 2~3개를 '함께 보면 좋은 글'로 연결해요 (방문자가 더 많은 글을 보게)."""
+    mine = {l for l in labels if l != "생활정보"}
+    scored = []
+    for p in get_past_posts():
+        if p["title"] == title:
+            continue
+        overlap = len(mine & set(p["labels"]))
+        scored.append((overlap, p))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    picks = [p for o, p in scored if o > 0][:3]
+    if len(picks) < 2:  # 겹치는 글이 적으면 최신 글로 채워요
+        picks += [p for o, p in scored if p not in picks][: 3 - len(picks)]
+    if not picks:
+        return html
+    items = "".join(
+        f'<li><a href="{p["url"]}">{htmllib.escape(p["title"])}</a></li>' for p in picks
+    )
+    block = f"<h3>함께 보면 좋은 글</h3><ul>{items}</ul>\n"
+    i = html.rfind("<p><i>※")
+    return html[:i] + block + html[i:] if i >= 0 else html + block
 
 
 def review_post(html):

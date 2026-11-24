@@ -124,26 +124,42 @@ def claude_generate(prompt):
 
 def gemini_generate(prompt):
     """제미나이 무료 API. 설정한 모델이 없으면 다음 모델로 넘어가요."""
+    import time
+
     last_err = None
     for model in CONFIG["gemini_models"]:
-        r = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
-            json={
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 16000},
-            },
-            timeout=180,
-        )
-        if r.status_code in (404, 400) and "not found" in r.text.lower():
-            last_err = f"{model}: 모델 없음"
-            continue
-        if r.status_code != 200:
-            raise RuntimeError(f"제미나이 오류 {r.status_code}: {r.text[:500]}")
-        parts = r.json()["candidates"][0]["content"]["parts"]
-        print("사용 모델:", model)
-        return "".join(p.get("text", "") for p in parts)
-    raise RuntimeError(f"쓸 수 있는 제미나이 모델이 없어요 ({last_err})")
+        for attempt in range(4):
+            try:
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
+                    json={
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 16000},
+                    },
+                    timeout=240,
+                )
+            except requests.RequestException as e:
+                last_err = f"{model}: {e}"
+                time.sleep(20)
+                continue
+            if r.status_code == 200:
+                try:
+                    parts = r.json()["candidates"][0]["content"]["parts"]
+                except (KeyError, IndexError):
+                    last_err = f"{model}: 빈 응답"
+                    time.sleep(10)
+                    continue
+                print("사용 모델:", model)
+                return "".join(p.get("text", "") for p in parts)
+            last_err = f"{model}: {r.status_code} {r.text[:200]}"
+            if r.status_code in (404, 400, 403):
+                break  # 이 모델은 못 씀 -> 다음 모델로
+            # 503(바쁨), 429(잠시 한도), 500 등은 기다렸다가 다시 시도
+            wait = 30 * (attempt + 1)
+            print(f"{model} 응답 {r.status_code}, {wait}초 뒤 다시 시도")
+            time.sleep(wait)
+    raise RuntimeError(f"제미나이를 쓸 수 없어요 ({last_err})")
 
 
 def get_news(query, n=8):

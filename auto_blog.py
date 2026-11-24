@@ -475,6 +475,29 @@ def publish():
     status = "게시" if CONFIG["publish"] else "임시저장"
     print(f"{status} 완료: {post['title']}")
     print("주소:", result.get("url", "(임시저장 글은 주소 없음)"))
+    notify_phone(post["title"], result.get("url") or f"https://{CONFIG['blog_host']}/", status)
+
+
+def notify_phone(title, url, status):
+    """ntfy 앱으로 휴대폰에 '새 글 올라감' 알림을 보내요. 누르면 글이 열려요."""
+    topic = CONFIG.get("ntfy_topic")
+    if not topic:
+        return
+    try:
+        requests.post(
+            "https://ntfy.sh/",
+            json={
+                "topic": topic,
+                "title": f"새 글이 {status}됐어요",
+                "message": title,
+                "click": url,
+                "tags": ["memo"],
+                "actions": [{"action": "view", "label": "글 보기", "url": url}],
+            },
+            timeout=20,
+        )
+    except Exception:
+        pass  # 알림이 실패해도 게시는 이미 끝났으니 조용히 넘어가요
 
 
 if __name__ == "__main__":

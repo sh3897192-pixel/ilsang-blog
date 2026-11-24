@@ -15,7 +15,7 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +31,13 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-        run: python auto_blog.py prepare
+        run: |
+          # 실패하면 새 주제로 최대 3번까지 다시 시도해요
+          for i in 1 2 3; do
+            python -u auto_blog.py prepare && break
+            echo "다시 시도 ($i/3)"; sleep 60
+          done
+          test -f out/post.json
 
       - name: 사진을 저장소에 올리기
         run: |
@@ -46,7 +52,7 @@ jobs:
           BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
           BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
-        run: python auto_blog.py publish
+        run: python -u auto_blog.py publish
 
       - name: 쓴 주제 기록 저장
         run: |

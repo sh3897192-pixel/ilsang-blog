@@ -3,6 +3,7 @@
   "blog_id": "7305556839757906420",
   "blog_host": "ldh943655.blogspot.com",
   "publish": true,
+  "ntfy_topic": "ilsang-blog-4f2cbf5aaf",
   "ai": "gemini",
   "gemini_models": ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"],
   "claude_model": "claude-sonnet-5-5",

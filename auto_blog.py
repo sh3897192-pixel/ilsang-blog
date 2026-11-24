@@ -100,7 +100,7 @@ def build_prompt(trends, used_topics, today, topic=None, news=None):
   "title": "검색에 잘 걸리는 자연스러운 제목",
   "labels": ["생활정보", "키워드1", "키워드2", "키워드3"],
   "images": [
-    {{"query": "사진에 실제로 보일 물건·장면을 영어 2~3단어로 (예: radiator heating)", "caption": "그 query 그대로를 묘사한 짧은 한국어 설명"}},
+    {{"query": "사진에 실제로 보일 흔한 물건 이름을 영어 1~2단어로 (예: radiator, tangerine)", "caption": "그 query 그대로를 묘사한 짧은 한국어 설명"}},
     {{"query": "...", "caption": "..."}},
     {{"query": "...", "caption": "..."}}
   ]
@@ -260,12 +260,20 @@ def review_post(html):
 # ---------- 1단계: 사진 ----------
 def fetch_image(query, used_ids, save_as):
     """사진은 꼭 넣어야 해요. 검색어를 조금씩 바꿔 가며, 내용과 맞는 사진만 골라요."""
-    words = query.split()
-    keywords = [w.lower() for w in words if len(w) > 2] or [w.lower() for w in words]
-    tries = [query, " ".join(words[:3]), " ".join(words[:2]), words[0] if words else query]
-    for q in dict.fromkeys(t for t in tries if t):
+    stop = {"inside", "with", "the", "and", "for", "from", "into", "onto", "near", "on", "in", "of", "a", "an"}
+    words = [w for w in query.split() if w.lower() not in stop] or query.split()
+    keywords = [w.lower().rstrip("s") for w in words if len(w) > 2] or [w.lower() for w in words]
+    # 처음엔 단어 2개 이상 맞는 사진, 그다음엔 단어별로 하나씩 맞는 사진을 찾아요
+    tries = [(" ".join(words), 2 if len(keywords) >= 3 else 1)]
+    tries += [(" ".join(words[:2]), 1)]
+    tries += [(w, 1) for w in sorted(words, key=len, reverse=True) if len(w) > 2]
+    seen = set()
+    for q, need in tries:
+        if not q or q in seen:
+            continue
+        seen.add(q)
         try:
-            hit = _fetch_image(q, used_ids, save_as, keywords)
+            hit = _fetch_image(q, used_ids, save_as, keywords, need)
             if hit:
                 if q != query:
                     print(f"사진 검색어를 '{query}' -> '{q}'로 바꿔서 찾았어요")
@@ -275,7 +283,7 @@ def fetch_image(query, used_ids, save_as):
     return None
 
 
-def _fetch_image(query, used_ids, save_as, keywords=()):
+def _fetch_image(query, used_ids, save_as, keywords=(), need=1):
     # 붙여넣기할 때 따라 들어간 공백·줄바꿈·따옴표를 지워요
     raw = os.environ["PIXABAY_API_KEY"]
     found = re.search(r"\d+-[0-9a-f]{20,}", raw)  # 다른 글자가 섞여 들어가도 키 부분만 골라내요
@@ -300,7 +308,6 @@ def _fetch_image(query, used_ids, save_as, keywords=()):
         )
     hits = [h for h in r.json().get("hits", []) if h["id"] not in used_ids]
     # 사진 태그가 검색어와 많이 겹치는 것부터 골라요 (내용과 안 맞는 사진 방지)
-    need = 2 if len(keywords) >= 3 else 1
 
     def score(h):
         tags = h.get("tags", "").lower()

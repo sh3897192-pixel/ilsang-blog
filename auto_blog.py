@@ -6,6 +6,7 @@
   (워크플로가 사진을 저장소에 올림)
   python auto_blog.py publish   # 블로거에 게시 + 기록 저장
 """
+import html as htmllib
 import json
 import os
 import re
@@ -227,7 +228,7 @@ def review_post(html):
 고칠 것:
 1. 과학적·사실적 근거가 약하거나 틀릴 수 있는 문장은 빼거나, 누구나 아는 일반적인 표현으로 바꾸세요.
 2. 숫자·금액·날짜·비율 중 출처가 분명하지 않은 것은 빼세요.
-3. 글쓴이가 실제로 해 봤다는 과거 경험 표현("해 보니", "해봤더니", "써 보니" 등)은 "해 보려고 해요"처럼 앞으로의 계획으로 바꾸세요.
+3. 글 맨 끝의 1인칭 문단에서만, 글쓴이가 이미 해 봤다는 표현("해 보니", "해봤더니" 등)을 "해 보려고 해요"처럼 계획으로 바꾸세요. 독자에게 안내하는 다른 문장들은 "~하세요", "~해 주세요" 같은 안내 말투를 그대로 두세요.
 4. 어색한 문장, 맞춤법, 중복 내용을 다듬으세요.
 
 반드시 지킬 것:
@@ -323,7 +324,27 @@ def _fetch_image(query, used_ids, save_as, keywords=(), need=1):
     return None
 
 
+def caption_photos(tags_list):
+    """사진 태그(영어)를 보고, 사진에 실제로 보이는 것을 짧은 한국어 설명으로 써요."""
+    lines = "\n".join(f"{n}. {t}" for n, t in enumerate(tags_list, 1))
+    prompt = f"""아래는 사진 {len(tags_list)}장의 영어 태그예요. 각 사진에 실제로 보일 장면을
+15자 안팎의 자연스러운 한국어 설명으로 써 주세요. 태그에 없는 내용은 지어내지 마세요.
+{lines}
+JSON 배열만 <json></json> 태그로 감싸서 출력하세요. 예: <json>["눈 덮인 겨울 숲", "물이 흐르는 수도꼭지"]</json>"""
+    try:
+        gen = claude_generate if CONFIG["ai"] == "claude" else gemini_generate
+        out = gen(prompt)
+        m = re.search(r"<json>\s*(.*?)\s*</json>", out, re.S)
+        caps = json.loads(m.group(1)) if m else []
+        if len(caps) == len(tags_list) and all(isinstance(c, str) and c.strip() for c in caps):
+            return [c.strip() for c in caps]
+    except Exception as e:
+        print("사진 설명 다시 쓰기를 건너뛰어요:", str(e)[:100])
+    return None
+
+
 def figure_html(url, caption, page_url):
+    caption = htmllib.escape(caption, quote=True)
     return (
         '<div class="separator" style="clear: both; text-align: center;">'
         f'<img src="{url}" alt="{caption}" style="max-width:100%; height:auto;" /></div>'
@@ -352,16 +373,20 @@ def _prepare(stamp):
 
     html = post["html"]
     new_ids = []
+    found = []
     for i, im in enumerate(post["images"][:3], start=1):
         name = f"{stamp}-{i}.jpg"
         hit = fetch_image(im["query"], set(history["pixabay_ids"]) | set(new_ids), IMG_DIR / name)
-        marker = f"<!--IMG{i}-->"
-        if hit:
-            new_ids.append(hit["id"])
-            url = f"https://raw.githubusercontent.com/{repo}/{branch}/images/{name}"
-            html = html.replace(marker, figure_html(url, im["caption"], hit["pageURL"]))
-        else:
+        if not hit:
             raise RuntimeError(f"사진 {i}번을 끝내 못 구해서 이번 글은 올리지 않아요 (검색어: {im['query']})")
+        new_ids.append(hit["id"])
+        found.append((i, name, hit, im["caption"]))
+
+    # 실제로 고른 사진의 태그를 보고 사진 설명을 다시 써요 (사진과 설명이 어긋나지 않게)
+    captions = caption_photos([h.get("tags", "") for _, _, h, _ in found])
+    for (i, name, hit, old_cap), cap in zip(found, captions or [None] * len(found)):
+        url = f"https://raw.githubusercontent.com/{repo}/{branch}/images/{name}"
+        html = html.replace(f"<!--IMG{i}-->", figure_html(url, cap or old_cap, hit["pageURL"]))
 
     post["html"] = html
     post["pixabay_ids"] = new_ids

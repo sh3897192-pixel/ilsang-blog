@@ -221,12 +221,19 @@ def write_post():
 
 # ---------- 1단계: 사진 ----------
 def fetch_image(query, used_ids, save_as):
-    """사진을 못 구해도 글 게시는 계속되도록, 오류가 나면 사진 없이 넘어가요."""
-    try:
-        return _fetch_image(query, used_ids, save_as)
-    except Exception as e:
-        print(f"사진을 못 가져왔어요 ({query}): {str(e).split('?')[0]}")
-        return None
+    """사진은 꼭 넣어야 해요. 검색어를 조금씩 바꿔 가며 여러 번 찾아봐요."""
+    words = query.split()
+    tries = [query, " ".join(words[:2]), words[0] if words else query, "home", "lifestyle"]
+    for q in dict.fromkeys(t for t in tries if t):
+        try:
+            hit = _fetch_image(q, used_ids, save_as)
+            if hit:
+                if q != query:
+                    print(f"사진 검색어를 '{query}' -> '{q}'로 바꿔서 찾았어요")
+                return hit
+        except Exception as e:
+            print(f"사진 검색 실패 ({q}): {str(e).split('?')[0]}")
+    return None
 
 
 def _fetch_image(query, used_ids, save_as):
@@ -281,7 +288,7 @@ def prepare():
             url = f"https://raw.githubusercontent.com/{repo}/{branch}/images/{name}"
             html = html.replace(marker, figure_html(url, im["caption"], hit["pageURL"]))
         else:
-            html = html.replace(marker, "")
+            raise RuntimeError(f"사진 {i}번을 끝내 못 구해서 이번 글은 올리지 않아요 (검색어: {im['query']})")
 
     post["html"] = html
     post["pixabay_ids"] = new_ids

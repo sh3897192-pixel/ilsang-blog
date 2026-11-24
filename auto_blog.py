@@ -155,8 +155,10 @@ def gemini_generate(prompt):
             last_err = f"{model}: {r.status_code} {r.text[:200]}"
             if r.status_code in (404, 400, 403):
                 break  # 이 모델은 못 씀 -> 다음 모델로
+            if r.status_code == 503 and attempt >= 1:
+                break  # 계속 바쁘면 오래 기다리지 말고 다음 모델로
             # 503(바쁨), 429(잠시 한도), 500 등은 기다렸다가 다시 시도
-            wait = 30 * (attempt + 1)
+            wait = 20 * (attempt + 1)
             print(f"{model} 응답 {r.status_code}, {wait}초 뒤 다시 시도")
             time.sleep(wait)
     raise RuntimeError(f"제미나이를 쓸 수 없어요 ({last_err})")
@@ -219,6 +221,15 @@ def write_post():
 
 # ---------- 1단계: 사진 ----------
 def fetch_image(query, used_ids, save_as):
+    """사진을 못 구해도 글 게시는 계속되도록, 오류가 나면 사진 없이 넘어가요."""
+    try:
+        return _fetch_image(query, used_ids, save_as)
+    except Exception as e:
+        print(f"사진을 못 가져왔어요 ({query}): {str(e).split('?')[0]}")
+        return None
+
+
+def _fetch_image(query, used_ids, save_as):
     r = requests.get(
         "https://pixabay.com/api/",
         params={

@@ -1,0 +1,55 @@
+name: 매일 아침 블로그 글
+
+on:
+  schedule:
+    - cron: "40 21 * * *"   # 한국 시간 매일 오전 6시 40분 (깃허브가 몇 분~몇십 분 늦게 시작할 수 있음)
+  workflow_dispatch:         # Actions 화면에서 "Run workflow" 버튼으로 바로 실행
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-post
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 주제 선정 · 글 작성 · 사진 준비
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+        run: python auto_blog.py prepare
+
+      - name: 사진을 저장소에 올리기
+        run: |
+          git config user.name "blog-bot"
+          git config user.email "blog-bot@users.noreply.github.com"
+          git add images || true
+          git diff --cached --quiet || git commit -m "사진 추가 $(date +%F)"
+          git push
+
+      - name: 블로거에 게시
+        env:
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+        run: python auto_blog.py publish
+
+      - name: 쓴 주제 기록 저장
+        run: |
+          git add used_topics.json
+          git diff --cached --quiet || git commit -m "주제 기록 $(date +%F)"
+          git push

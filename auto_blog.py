@@ -238,7 +238,9 @@ def fetch_image(query, used_ids, save_as):
 
 def _fetch_image(query, used_ids, save_as):
     # 붙여넣기할 때 따라 들어간 공백·줄바꿈·따옴표를 지워요
-    key = os.environ["PIXABAY_API_KEY"].strip().strip('"').strip("'").strip()
+    raw = os.environ["PIXABAY_API_KEY"]
+    found = re.search(r"\d+-[0-9a-f]{20,}", raw)  # 다른 글자가 섞여 들어가도 키 부분만 골라내요
+    key = found.group(0) if found else raw.strip().strip('"').strip("'").strip()
     r = requests.get(
         "https://pixabay.com/api/",
         params={

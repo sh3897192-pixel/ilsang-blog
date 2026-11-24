@@ -1,0 +1,12 @@
+name: 휴대폰 알림 시험
+
+on:
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 시험 알림 보내기
+        run: |
+          curl -s -X POST https://ntfy.sh/ -H "Content-Type: application/json" -d '{"topic":"ilsang-blog-4f2cbf5aaf","title":"알림 테스트","message":"이 알림이 보이면 설정 완료예요. 누르면 블로그가 열려요.","click":"https://ldh943655.blogspot.com/","tags":["memo"]}'

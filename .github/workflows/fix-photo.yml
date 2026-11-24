@@ -12,6 +12,9 @@ on:
       alts:
         description: "대체 검색어 (쉼표로 구분)"
         required: false
+      context:
+        description: "사진이 들어갈 글 내용 (AI가 사진을 보고 어울리는지 확인)"
+        required: false
 
 permissions:
   contents: write
@@ -31,18 +34,21 @@ jobs:
           FILE: ${{ inputs.file }}
           QUERY: ${{ inputs.query }}
           ALTS: ${{ inputs.alts }}
+          CONTEXT: ${{ inputs.context }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python -u - <<'EOF'
           import os, json, auto_blog as a
           h = a.load_history()
           alts = [x.strip() for x in os.environ.get("ALTS", "").split(",") if x.strip()]
-          hit = a.fetch_image(os.environ["QUERY"], set(h["pixabay_ids"]), a.IMG_DIR / os.environ["FILE"], alts)
+          hit = a.fetch_image(os.environ["QUERY"], set(h["pixabay_ids"]), a.IMG_DIR / os.environ["FILE"], alts, os.environ.get("CONTEXT", ""))
           print("RESULT", json.dumps(hit, ensure_ascii=False, default=str))
           assert hit
           h["pixabay_ids"].append(hit.get("id")) if isinstance(hit, dict) and hit.get("id") else None
           a.save_history(h)
           EOF
       - name: 저장소에 올리기
+        if: ${{ !startsWith(inputs.file, '_') }}  # 파일 이름이 _로 시작하면 시험용이라 올리지 않아요
         run: |
           git config user.name "blog-bot"
           git config user.email "blog-bot@users.noreply.github.com"

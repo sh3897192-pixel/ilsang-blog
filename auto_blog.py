@@ -104,7 +104,7 @@ def build_prompt(trends, used_topics, today, topic=None, news=None):
   "title": "검색에 잘 걸리는 자연스러운 제목",
   "labels": ["생활정보", "키워드1", "키워드2", "키워드3"],
   "images": [
-    {{"query": "사진에 실제로 보일 흔한 물건 이름을 영어 1~2단어로 (예: radiator, tangerine)", "caption": "그 query 그대로를 묘사한 짧은 한국어 설명"}},
+    {{"query": "사진에 실제로 보일 흔한 물건 이름을 영어 1~2단어로 (예: radiator, tangerine)", "alts": ["비슷한 장면의 다른 영어 검색어 1~2단어", "더 흔한 대체 검색어"], "caption": "그 query 그대로를 묘사한 짧은 한국어 설명"}},
     {{"query": "...", "caption": "..."}},
     {{"query": "...", "caption": "..."}}
   ]
@@ -305,7 +305,7 @@ def review_post(html):
 
 
 # ---------- 1단계: 사진 ----------
-def fetch_image(query, used_ids, save_as):
+def fetch_image(query, used_ids, save_as, alts=()):
     """사진은 꼭 넣어야 해요. 검색어를 조금씩 바꿔 가며, 내용과 맞는 사진만 골라요."""
     stop = {"inside", "with", "the", "and", "for", "from", "into", "onto", "near", "on", "in", "of", "a", "an"}
     words = [w for w in query.split() if w.lower() not in stop] or query.split()
@@ -314,6 +314,7 @@ def fetch_image(query, used_ids, save_as):
     tries = [(" ".join(words), 2 if len(keywords) >= 3 else 1)]
     tries += [(" ".join(words[:2]), 1)]
     tries += [(w, 1) for w in sorted(words, key=len, reverse=True) if len(w) > 2]
+    tries += [(a, 1) for a in alts if a]  # 글쓴이가 준 대체 검색어
     seen = set()
     for q, need in tries:
         if not q or q in seen:
@@ -327,6 +328,15 @@ def fetch_image(query, used_ids, save_as):
                 return hit
         except Exception as e:
             print(f"사진 검색 실패 ({q}): {str(e).split('?')[0]}")
+    # 마지막 방법: 대체 검색어의 가장 인기 있는 사진을 태그 확인 없이 써요 (주제와 관련된 검색어라 크게 어긋나지 않아요)
+    for q in [a for a in alts if a] + [query]:
+        try:
+            hit = _fetch_image(q, used_ids, save_as, (), 0)
+            if hit:
+                print(f"사진 검색어 '{q}'의 대표 사진을 썼어요")
+                return hit
+        except Exception:
+            pass
     return None
 
 
@@ -422,7 +432,7 @@ def _prepare(stamp):
     found = []
     for i, im in enumerate(post["images"][:3], start=1):
         name = f"{stamp}-{i}.jpg"
-        hit = fetch_image(im["query"], set(history["pixabay_ids"]) | set(new_ids), IMG_DIR / name)
+        hit = fetch_image(im["query"], set(history["pixabay_ids"]) | set(new_ids), IMG_DIR / name, im.get("alts") or ())
         if not hit:
             raise RuntimeError(f"사진 {i}번을 끝내 못 구해서 이번 글은 올리지 않아요 (검색어: {im['query']})")
         new_ids.append(hit["id"])

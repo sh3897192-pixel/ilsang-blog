@@ -2,11 +2,32 @@ name: 휴대폰 알림 시험
 
 on:
   workflow_dispatch:
+    inputs:
+      title:
+        description: "알림 제목"
+        default: "알림 테스트"
+      message:
+        description: "알림 내용"
+        default: "이 알림이 보이면 설정 완료예요. 누르면 블로그가 열려요."
+      url:
+        description: "누르면 열릴 주소"
+        default: "https://ldh943655.blogspot.com/"
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: 시험 알림 보내기
+      - name: 알림 보내기
+        env:
+          T: ${{ inputs.title }}
+          M: ${{ inputs.message }}
+          U: ${{ inputs.url }}
         run: |
-          curl -s -X POST https://ntfy.sh/ -H "Content-Type: application/json" -d '{"topic":"ilsang-blog-4f2cbf5aaf","title":"알림 테스트","message":"이 알림이 보이면 설정 완료예요. 누르면 블로그가 열려요.","click":"https://ldh943655.blogspot.com/","tags":["memo"]}'
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          body = {"topic": "ilsang-blog-4f2cbf5aaf", "title": os.environ["T"], "message": os.environ["M"],
+                  "click": os.environ["U"], "tags": ["memo"],
+                  "actions": [{"action": "view", "label": "글 보기", "url": os.environ["U"]}]}
+          req = urllib.request.Request("https://ntfy.sh/", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+          print(urllib.request.urlopen(req).status)
+          EOF

@@ -1,0 +1,15 @@
+{
+  "blog_name": "일상기록장",
+  "blog_id": "7305556839757906420",
+  "publish": false,
+  "ai": "gemini",
+  "gemini_models": ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
+  "claude_model": "claude-sonnet-5-5",
+  "categories": [
+    "날씨·계절 준비 (추위, 더위, 장마, 미세먼지 등)",
+    "살림·청소·정리",
+    "장보기·제철 식재료·보관법",
+    "생활비 절약·공공요금·정부 지원 제도",
+    "건강한 생활 습관 (일반 상식 수준)"
+  ]
+}

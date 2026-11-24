@@ -5,13 +5,16 @@
   "publish": false,
   "ntfy_topic": "ilsang-blog-4f2cbf5aaf",
   "ai": "gemini",
-  "gemini_models": ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"],
+  "gemini_models": [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash"
+  ],
   "claude_model": "claude-sonnet-5-5",
   "categories": [
-    "날씨·계절 준비 (추위, 더위, 장마, 미세먼지 등)",
-    "살림·청소·정리",
-    "장보기·제철 식재료·보관법",
-    "생활비 절약·공공요금·정부 지원 제도",
-    "건강한 생활 습관 (일반 상식 수준)"
+    "계절 준비·계절 살림 (난방·동파·결로·장마·곰팡이·더위·미세먼지 대비 등 그 계절에 꼭 필요한 집안 관리)",
+    "생활 절약 꿀팁 (난방비·전기요금·수도요금·가스비 등 공과금을 아끼는 생활 습관)",
+    "살림·청소·정리 요령 (계절 옷 정리, 대청소, 세탁, 수납)",
+    "제철 식재료 고르기·보관법 (계절 장보기, 오래 보관하는 법)"
   ]
 }

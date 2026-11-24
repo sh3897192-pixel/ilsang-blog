@@ -305,42 +305,110 @@ def review_post(html):
 
 
 # ---------- 1단계: 사진 ----------
-def fetch_image(query, used_ids, save_as, alts=()):
-    """사진은 꼭 넣어야 해요. 검색어를 조금씩 바꿔 가며, 내용과 맞는 사진만 골라요."""
-    stop = {"inside", "with", "the", "and", "for", "from", "into", "onto", "near", "on", "in", "of", "a", "an"}
-    words = [w for w in query.split() if w.lower() not in stop] or query.split()
-    keywords = [w.lower().rstrip("s") for w in words if len(w) > 2] or [w.lower() for w in words]
-    # 처음엔 단어 2개 이상 맞는 사진, 그다음엔 단어별로 하나씩 맞는 사진을 찾아요
-    tries = [(" ".join(words), 2 if len(keywords) >= 3 else 1)]
-    tries += [(" ".join(words[:2]), 1)]
-    tries += [(w, 1) for w in sorted(words, key=len, reverse=True) if len(w) > 2]
-    tries += [(a, 1) for a in alts if a]  # 글쓴이가 준 대체 검색어
-    seen = set()
-    for q, need in tries:
-        if not q or q in seen:
-            continue
-        seen.add(q)
-        try:
-            hit = _fetch_image(q, used_ids, save_as, keywords, need)
-            if hit:
-                if q != query:
-                    print(f"사진 검색어를 '{query}' -> '{q}'로 바꿔서 찾았어요")
-                return hit
-        except Exception as e:
-            print(f"사진 검색 실패 ({q}): {str(e).split('?')[0]}")
-    # 마지막 방법: 대체 검색어의 가장 인기 있는 사진을 태그 확인 없이 써요 (주제와 관련된 검색어라 크게 어긋나지 않아요)
-    for q in [a for a in alts if a] + [query]:
-        try:
-            hit = _fetch_image(q, used_ids, save_as, (), 0)
-            if hit:
-                print(f"사진 검색어 '{q}'의 대표 사진을 썼어요")
-                return hit
-        except Exception:
-            pass
+def gemini_vision(prompt, img_bytes):
+    """제미나이에게 사진을 직접 보여 주고 물어봐요."""
+    import base64
+    import time
+
+    for model in CONFIG["gemini_models"]:
+        for attempt in range(3):
+            try:
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip()},
+                    json={
+                        "contents": [{"role": "user", "parts": [
+                            {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(img_bytes).decode()}},
+                            {"text": prompt},
+                        ]}],
+                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000},
+                    },
+                    timeout=90,
+                )
+            except requests.RequestException:
+                time.sleep(10)
+                continue
+            if r.status_code == 200:
+                try:
+                    return "".join(x.get("text", "") for x in r.json()["candidates"][0]["content"]["parts"])
+                except (KeyError, IndexError):
+                    time.sleep(5)
+                    continue
+            if r.status_code in (404, 400, 403):
+                break
+            time.sleep(15 * (attempt + 1))
     return None
 
 
-def _fetch_image(query, used_ids, save_as, keywords=(), need=1):
+def photo_fits(img_bytes, context):
+    """사진이 글 내용과 어울리는지 AI가 사진을 직접 보고 판단해요. (어울림, 사진 설명)"""
+    prompt = f"""블로그 글의 이 부분에 넣을 사진을 고르고 있어요.
+[글 내용]
+{context}
+
+이 사진이 위 글 내용과 직접 관련 있어서, 읽는 사람이 보고 "내용에 맞는 사진이네"라고 느낄지 판단하세요.
+- 글 내용과 상관없는 물건·장소(예: 자동차 글이 아닌데 자동차, 음식 글이 아닌데 음식)가 주인공이면 false
+- 글씨·로고가 크게 들어간 사진, 사람 얼굴이 크게 나온 사진도 false
+- 분위기만 비슷하고 내용과 연결이 약하면 false
+그리고 사진에 실제로 보이는 것을 15자 안팎 한국어로 설명하세요 (보이지 않는 것은 쓰지 마세요).
+JSON만 출력: {{"fits": true 또는 false, "caption": "사진 설명"}}"""
+    out = gemini_vision(prompt, img_bytes)
+    if out is None:
+        return None, None  # AI 확인을 못 함
+    try:
+        m = re.search(r"\{.*\}", out, re.S)
+        d = json.loads(m.group(0))
+        return bool(d.get("fits")), (d.get("caption") or "").strip() or None
+    except Exception:
+        return False, None
+
+
+def fetch_image(query, used_ids, save_as, alts=(), context=""):
+    """사진은 꼭 넣어야 해요. 검색어를 바꿔 가며 찾고, AI가 사진을 직접 보고 글과 어울리는 것만 써요."""
+    stop = {"inside", "with", "the", "and", "for", "from", "into", "onto", "near", "on", "in", "of", "a", "an"}
+    words = [w for w in query.split() if w.lower() not in stop] or query.split()
+    keywords = [w.lower().rstrip("s") for w in words if len(w) > 2] or [w.lower() for w in words]
+    tries = [(" ".join(words), 2 if len(keywords) >= 3 else 1)]
+    tries += [(" ".join(words[:2]), 1)]
+    tries += [(a, 0) for a in alts if a]  # 글쓴이가 준 대체 검색어 (AI가 사진을 직접 확인)
+    tries += [(w, 1) for w in sorted(words, key=len, reverse=True) if len(w) > 2]
+    tries += [(" ".join(words), 0)]
+    budget = {"checks": 14}  # 사진 한 장당 AI 확인 최대 횟수
+    seen = set()
+
+    def run(tries):
+        for q, need in tries:
+            if not q or (q, need) in seen or budget["checks"] <= 0:
+                continue
+            seen.add((q, need))
+            try:
+                hit = _fetch_image(q, used_ids, save_as, keywords if need else (), need, context, budget)
+                if hit:
+                    print(f"사진 검색어 '{q}'로 글과 어울리는 사진을 찾았어요")
+                    return hit
+            except Exception as e:
+                print(f"사진 검색 실패 ({q}): {str(e).split('?')[0]}")
+        return None
+
+    hit = run(tries)
+    if hit or not context:
+        return hit
+    # 그래도 없으면 AI에게 글 내용을 보여 주고 새 검색어를 받아서 다시 찾아요
+    try:
+        out = gemini_generate(f"""아래 블로그 글 내용에 어울리는 무료 사진을 픽사베이에서 찾으려고 해요.
+사진에 실제로 찍혀 있을 만한 흔한 장면을 영어 검색어(1~2단어) 5개로 주세요. 이미 써 본 검색어: {', '.join(sorted({q for q, _ in seen}))}
+[글 내용]
+{context}
+JSON 배열만 출력: ["...", "..."]""")
+        more = json.loads(re.search(r"\[.*\]", out, re.S).group(0))
+        budget["checks"] = 10
+        hit = run([(q, 0) for q in more if isinstance(q, str)])
+    except Exception as e:
+        print("새 검색어 받기 실패:", str(e)[:80])
+    return hit
+
+
+def _fetch_image(query, used_ids, save_as, keywords=(), need=1, context="", budget=None):
     # 붙여넣기할 때 따라 들어간 공백·줄바꿈·따옴표를 지워요
     raw = os.environ["PIXABAY_API_KEY"]
     found = re.search(r"\d+-[0-9a-f]{20,}", raw)  # 다른 글자가 섞여 들어가도 키 부분만 골라내요
@@ -364,7 +432,6 @@ def _fetch_image(query, used_ids, save_as, keywords=(), need=1):
             f"(키 길이 {len(key)}자, 형식 {'정상' if looks_ok else '이상함'})"
         )
     hits = [h for h in r.json().get("hits", []) if h["id"] not in used_ids]
-    # 사진 태그가 검색어와 많이 겹치는 것부터 골라요 (내용과 안 맞는 사진 방지)
 
     def score(h):
         tags = h.get("tags", "").lower()
@@ -372,12 +439,42 @@ def _fetch_image(query, used_ids, save_as, keywords=(), need=1):
 
     hits = [h for h in hits if not keywords or score(h) >= need]
     hits.sort(key=score, reverse=True)
-    for hit in hits:
+    for hit in hits[:4]:  # 검색어마다 위쪽 사진 4장까지 AI가 직접 확인
+        if context and budget is not None:
+            if budget["checks"] <= 0:
+                return None
+            budget["checks"] -= 1
+            small = requests.get(hit["webformatURL"], timeout=60)
+            small.raise_for_status()
+            ok, cap = photo_fits(small.content, context)
+            if ok is None:  # AI 확인이 안 되면 태그가 맞는 사진만 써요
+                if not keywords or score(hit) < 1:
+                    continue
+            elif not ok:
+                print(f"  어울리지 않아서 건너뜀: {hit.get('tags', '')}")
+                continue
+            hit["_caption"] = cap
         img = requests.get(hit.get("largeImageURL") or hit["webformatURL"], timeout=60)
         img.raise_for_status()
         save_as.write_bytes(img.content)
         return hit
     return None
+
+
+def photo_context(html, i, caption):
+    """사진 자리 앞뒤의 소제목·문장을 뽑아서, 그 사진이 들어갈 글 내용을 만들어요."""
+    mark = f"<!--IMG{i}-->"
+    pos = html.find(mark)
+    if pos < 0:
+        return caption
+    before = html[:pos]
+    heads = re.findall(r"<h2[^>]*>(.*?)</h2>", before, re.S)
+    head = re.sub(r"<[^>]+>", "", heads[-1]).strip() if heads else ""
+    prev = re.sub(r"<[^>]+>", " ", before[-400:])
+    after = re.sub(r"<!--IMG\d-->", " ", html[pos + len(mark):pos + len(mark) + 900])
+    after = re.sub(r"<[^>]+>", " ", after)
+    text = re.sub(r"\s+", " ", (prev + " " + after)).strip()
+    return f"소제목: {head}\n사진 설명(예정): {caption}\n주변 문장: {text[:600]}"
 
 
 def caption_photos(tags_list):
@@ -432,14 +529,20 @@ def _prepare(stamp):
     found = []
     for i, im in enumerate(post["images"][:3], start=1):
         name = f"{stamp}-{i}.jpg"
-        hit = fetch_image(im["query"], set(history["pixabay_ids"]) | set(new_ids), IMG_DIR / name, im.get("alts") or ())
+        ctx = f"글 제목: {post['title']}\n" + photo_context(html, i, im["caption"])
+        hit = fetch_image(im["query"], set(history["pixabay_ids"]) | set(new_ids), IMG_DIR / name, im.get("alts") or (), ctx)
         if not hit:
             raise RuntimeError(f"사진 {i}번을 끝내 못 구해서 이번 글은 올리지 않아요 (검색어: {im['query']})")
         new_ids.append(hit["id"])
         found.append((i, name, hit, im["caption"]))
 
     # 실제로 고른 사진의 태그를 보고 사진 설명을 다시 써요 (사진과 설명이 어긋나지 않게)
-    captions = caption_photos([h.get("tags", "") for _, _, h, _ in found])
+    # AI가 사진을 직접 보고 쓴 설명이 있으면 그걸 쓰고, 없으면 태그로 설명을 써요
+    if all(h.get("_caption") for _, _, h, _ in found):
+        captions = [h["_caption"] for _, _, h, _ in found]
+    else:
+        captions = caption_photos([h.get("tags", "") for _, _, h, _ in found])
+        captions = [h.get("_caption") or c for (_, _, h, _), c in zip(found, captions or [None] * len(found))]
     for (i, name, hit, old_cap), cap in zip(found, captions or [None] * len(found)):
         url = f"https://raw.githubusercontent.com/{repo}/{branch}/images/{name}"
         html = html.replace(f"<!--IMG{i}-->", figure_html(url, cap or old_cap, hit["pageURL"]))

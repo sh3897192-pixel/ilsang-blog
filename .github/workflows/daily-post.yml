@@ -3,6 +3,7 @@ name: 매일 아침 블로그 글
 on:
   schedule:
     - cron: "40 21 * * *"   # 한국 시간 매일 오전 6시 40분 (깃허브가 몇 분~몇십 분 늦게 시작할 수 있음)
+    - cron: "40 9 * * *"    # 한국 시간 매일 오후 6시 40분
   workflow_dispatch:         # Actions 화면에서 "Run workflow" 버튼으로 바로 실행
 
 permissions:

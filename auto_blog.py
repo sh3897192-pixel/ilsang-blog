@@ -132,7 +132,7 @@ def gemini_generate(prompt):
             try:
                 r = requests.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
+                    headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip()},
                     json={
                         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 16000},
@@ -237,10 +237,12 @@ def fetch_image(query, used_ids, save_as):
 
 
 def _fetch_image(query, used_ids, save_as):
+    # 붙여넣기할 때 따라 들어간 공백·줄바꿈·따옴표를 지워요
+    key = os.environ["PIXABAY_API_KEY"].strip().strip('"').strip("'").strip()
     r = requests.get(
         "https://pixabay.com/api/",
         params={
-            "key": os.environ["PIXABAY_API_KEY"],
+            "key": key,
             "q": query[:100],
             "image_type": "photo",
             "safesearch": "true",
@@ -249,7 +251,12 @@ def _fetch_image(query, used_ids, save_as):
         },
         timeout=30,
     )
-    r.raise_for_status()
+    if r.status_code != 200:
+        looks_ok = bool(re.fullmatch(r"\d+-[0-9a-f]+", key))
+        raise RuntimeError(
+            f"픽사베이 {r.status_code}: {r.text[:80]} "
+            f"(키 길이 {len(key)}자, 형식 {'정상' if looks_ok else '이상함'})"
+        )
     for hit in r.json().get("hits", []):
         if hit["id"] in used_ids:
             continue
@@ -302,9 +309,9 @@ def prepare():
 def blogger():
     creds = Credentials(
         token=None,
-        refresh_token=os.environ["BLOGGER_REFRESH_TOKEN"],
-        client_id=os.environ["BLOGGER_CLIENT_ID"],
-        client_secret=os.environ["BLOGGER_CLIENT_SECRET"],
+        refresh_token=os.environ["BLOGGER_REFRESH_TOKEN"].strip(),
+        client_id=os.environ["BLOGGER_CLIENT_ID"].strip(),
+        client_secret=os.environ["BLOGGER_CLIENT_SECRET"].strip(),
         token_uri="https://oauth2.googleapis.com/token",
         scopes=["https://www.googleapis.com/auth/blogger"],
     )

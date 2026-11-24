@@ -493,21 +493,25 @@ def notify_phone(title, url, status):
     topic = CONFIG.get("ntfy_topic")
     if not topic:
         return
-    try:
-        requests.post(
-            "https://ntfy.sh/",
-            json={
-                "topic": topic,
-                "title": f"새 글이 {status}됐어요",
-                "message": title,
-                "click": url,
-                "tags": ["memo"],
-                "actions": [{"action": "view", "label": "글 보기", "url": url}],
-            },
-            timeout=20,
-        )
-    except Exception:
-        pass  # 알림이 실패해도 게시는 이미 끝났으니 조용히 넘어가요
+    import time
+    body = {
+        "topic": topic,
+        "title": f"새 글이 {status}됐어요",
+        "message": title,
+        "click": url,
+        "tags": ["memo"],
+        "actions": [{"action": "view", "label": "글 보기", "url": url}],
+    }
+    for i in range(4):  # 안 되면 조금 기다렸다가 다시 보내요
+        try:
+            r = requests.post("https://ntfy.sh/", json=body, timeout=20)
+            if r.ok:
+                print("휴대폰 알림 보냄")
+                return
+            print(f"알림 재시도 ({r.status_code})")
+        except Exception as e:
+            print(f"알림 재시도 ({type(e).__name__})")
+        time.sleep(10 * (i + 1))
 
 
 if __name__ == "__main__":

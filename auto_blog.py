@@ -88,7 +88,7 @@ def build_prompt(trends, used_topics, today, topic=None, news=None):
 - 본문은 HTML로만 쓰세요(<p>, <h2>, <ul>, <li>, <b>, <a>). 마크다운 금지.
 - 사진 자리 3곳에 정확히 <!--IMG1-->, <!--IMG2-->, <!--IMG3--> 를 넣으세요. IMG1은 첫 문단 바로 아래, IMG2와 IMG3은 서로 다른 소제목 바로 아래.
 - 글 끝에 참고한 공식 자료 링크 1~2개를 <p>참고 자료: <a href="...">...</a></p> 형태로 넣으세요.
-- 그 다음에 블로그 주인의 1인칭 문단(2~3문장)을 넣으세요. 이 주제를 정리하며 느낀 점과 앞으로 해 보려는 일을 편한 말투로. 실제로 겪은 구체적인 일은 지어내지 마세요.
+- 그 다음에 블로그 주인의 1인칭 문단(2~3문장)을 넣으세요. 이 주제를 정리하며 느낀 점과 앞으로 해 보려는 일을 편한 말투로. "해 보니"처럼 이미 해 본 것처럼 쓰지 말고, 실제로 겪은 구체적인 일은 지어내지 마세요.
 - 맨 끝에 <p><i>※ 이 글은 {today} 기준 공개 자료를 바탕으로 정리했으며, 이후 달라질 수 있어요.</i></p>
 
 [출력 형식]
@@ -100,7 +100,7 @@ def build_prompt(trends, used_topics, today, topic=None, news=None):
   "title": "검색에 잘 걸리는 자연스러운 제목",
   "labels": ["생활정보", "키워드1", "키워드2", "키워드3"],
   "images": [
-    {{"query": "픽사베이 영어 검색어", "caption": "한국어 사진 설명"}},
+    {{"query": "사진에 실제로 보일 물건·장면을 영어 2~3단어로 (예: radiator heating)", "caption": "그 query 그대로를 묘사한 짧은 한국어 설명"}},
     {{"query": "...", "caption": "..."}},
     {{"query": "...", "caption": "..."}}
   ]
@@ -216,17 +216,56 @@ def write_post():
     for key in ("topic", "title", "labels", "images", "html"):
         if key not in post:
             raise ValueError(f"응답에 {key} 항목이 없어요")
+    post["html"] = review_post(post["html"])
     return post, history
+
+
+def review_post(html):
+    """다 쓴 글을 한 번 더 검토해서, 근거 없는 주장과 지어낸 경험을 고쳐요."""
+    prompt = f"""아래는 한국어 생활 정보 블로그 글의 HTML입니다. 편집자로서 검토하고 고친 HTML 전체를 돌려주세요.
+
+고칠 것:
+1. 과학적·사실적 근거가 약하거나 틀릴 수 있는 문장은 빼거나, 누구나 아는 일반적인 표현으로 바꾸세요.
+2. 숫자·금액·날짜·비율 중 출처가 분명하지 않은 것은 빼세요.
+3. 글쓴이가 실제로 해 봤다는 과거 경험 표현("해 보니", "해봤더니", "써 보니" 등)은 "해 보려고 해요"처럼 앞으로의 계획으로 바꾸세요.
+4. 어색한 문장, 맞춤법, 중복 내용을 다듬으세요.
+
+반드시 지킬 것:
+- <!--IMG1-->, <!--IMG2-->, <!--IMG3--> 표시와 모든 <a href> 링크, <h2> 소제목 구조는 그대로 두세요.
+- 분량은 원래와 비슷하게 유지하세요 (1500자 이상).
+- 설명 없이 고친 HTML만 <article></article> 태그로 감싸서 출력하세요.
+
+<article>
+{html}
+</article>"""
+    try:
+        gen = claude_generate if CONFIG["ai"] == "claude" else gemini_generate
+        out = gen(prompt)
+        m = re.search(r"<article>(.*)</article>", out, re.S)
+        fixed = m.group(1).strip() if m else ""
+        ok = (
+            len(fixed) >= max(1500, int(len(html) * 0.7))
+            and all(f"<!--IMG{i}-->" in fixed for i in (1, 2, 3))
+            and fixed.count("<h2>") >= 2
+        )
+        if ok:
+            print("검토 완료: 글을 다듬었어요")
+            return fixed
+        print("검토 결과가 형식에 맞지 않아 원래 글을 써요")
+    except Exception as e:
+        print("검토 단계를 건너뛰어요:", str(e)[:100])
+    return html
 
 
 # ---------- 1단계: 사진 ----------
 def fetch_image(query, used_ids, save_as):
-    """사진은 꼭 넣어야 해요. 검색어를 조금씩 바꿔 가며 여러 번 찾아봐요."""
+    """사진은 꼭 넣어야 해요. 검색어를 조금씩 바꿔 가며, 내용과 맞는 사진만 골라요."""
     words = query.split()
-    tries = [query, " ".join(words[:2]), words[0] if words else query, "home", "lifestyle"]
+    keywords = [w.lower() for w in words if len(w) > 2] or [w.lower() for w in words]
+    tries = [query, " ".join(words[:3]), " ".join(words[:2]), words[0] if words else query]
     for q in dict.fromkeys(t for t in tries if t):
         try:
-            hit = _fetch_image(q, used_ids, save_as)
+            hit = _fetch_image(q, used_ids, save_as, keywords)
             if hit:
                 if q != query:
                     print(f"사진 검색어를 '{query}' -> '{q}'로 바꿔서 찾았어요")
@@ -236,7 +275,7 @@ def fetch_image(query, used_ids, save_as):
     return None
 
 
-def _fetch_image(query, used_ids, save_as):
+def _fetch_image(query, used_ids, save_as, keywords=()):
     # 붙여넣기할 때 따라 들어간 공백·줄바꿈·따옴표를 지워요
     raw = os.environ["PIXABAY_API_KEY"]
     found = re.search(r"\d+-[0-9a-f]{20,}", raw)  # 다른 글자가 섞여 들어가도 키 부분만 골라내요
@@ -259,9 +298,17 @@ def _fetch_image(query, used_ids, save_as):
             f"픽사베이 {r.status_code}: {r.text[:80]} "
             f"(키 길이 {len(key)}자, 형식 {'정상' if looks_ok else '이상함'})"
         )
-    for hit in r.json().get("hits", []):
-        if hit["id"] in used_ids:
-            continue
+    hits = [h for h in r.json().get("hits", []) if h["id"] not in used_ids]
+    # 사진 태그가 검색어와 많이 겹치는 것부터 골라요 (내용과 안 맞는 사진 방지)
+    need = 2 if len(keywords) >= 3 else 1
+
+    def score(h):
+        tags = h.get("tags", "").lower()
+        return sum(1 for k in keywords if k in tags)
+
+    hits = [h for h in hits if not keywords or score(h) >= need]
+    hits.sort(key=score, reverse=True)
+    for hit in hits:
         img = requests.get(hit.get("largeImageURL") or hit["webformatURL"], timeout=60)
         img.raise_for_status()
         save_as.write_bytes(img.content)
@@ -279,12 +326,22 @@ def figure_html(url, caption, page_url):
 
 
 def prepare():
+    stamp = dt.datetime.now(KST).strftime("%Y%m%d-%H%M")
+    try:
+        _prepare(stamp)
+    except Exception:
+        # 실패한 시도에서 받아 둔 사진은 지워서 저장소에 쌓이지 않게 해요
+        for f in IMG_DIR.glob(f"{stamp}-*.jpg"):
+            f.unlink()
+        raise
+
+
+def _prepare(stamp):
     post, history = write_post()
     IMG_DIR.mkdir(exist_ok=True)
     OUT_DIR.mkdir(exist_ok=True)
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     branch = os.environ.get("GITHUB_REF_NAME", "main")
-    stamp = dt.datetime.now(KST).strftime("%Y%m%d-%H%M")
 
     html = post["html"]
     new_ids = []

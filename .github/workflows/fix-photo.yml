@@ -1,0 +1,51 @@
+name: 사진 바꾸기
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "바꿀 사진 파일 이름 (예: 20261125-0749-2.jpg)"
+        required: true
+      query:
+        description: "새 사진 영어 검색어"
+        required: true
+      alts:
+        description: "대체 검색어 (쉼표로 구분)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: 새 사진 찾기
+        env:
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          FILE: ${{ inputs.file }}
+          QUERY: ${{ inputs.query }}
+          ALTS: ${{ inputs.alts }}
+        run: |
+          python -u - <<'EOF'
+          import os, json, auto_blog as a
+          h = a.load_history()
+          alts = [x.strip() for x in os.environ.get("ALTS", "").split(",") if x.strip()]
+          hit = a.fetch_image(os.environ["QUERY"], set(h["pixabay_ids"]), a.IMG_DIR / os.environ["FILE"], alts)
+          print("RESULT", json.dumps(hit, ensure_ascii=False, default=str))
+          assert hit
+          h["pixabay_ids"].append(hit.get("id")) if isinstance(hit, dict) and hit.get("id") else None
+          a.save_history(h)
+          EOF
+      - name: 저장소에 올리기
+        run: |
+          git config user.name "blog-bot"
+          git config user.email "blog-bot@users.noreply.github.com"
+          git add images used_topics.json
+          git diff --cached --quiet || git commit -m "사진 교체"
+          git push
